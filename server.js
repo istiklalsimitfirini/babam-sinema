@@ -10,6 +10,12 @@ const PORT = process.env.PORT || 3000;
 // Enable CORS for all routes
 app.use(cors());
 
+// Helper to get correct protocol (handling HTTPS proxy termination in cloud environments like Render/Koyeb)
+function getHostUrl(req) {
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  return `${protocol}://${req.get('host')}`;
+}
+
 // Serve static portal files
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -59,7 +65,7 @@ app.get('/playlist.m3u', async (req, res) => {
     const forceRefresh = req.query.refresh === 'true';
     const rawData = await getM3UData(forceRefresh);
 
-    const host = req.protocol + '://' + req.get('host');
+    const host = getHostUrl(req);
     console.log(`Rewriting playlist links to use host: ${host}`);
 
     // Regex explanation:
@@ -94,7 +100,7 @@ app.get('/vs/:id.m3u8', async (req, res) => {
       }
     });
 
-    const host = req.protocol + '://' + req.get('host');
+    const host = getHostUrl(req);
     let playlistText = response.data;
 
     // Rewrite internal master playlist links:
@@ -136,7 +142,7 @@ app.get('/mm/*', async (req, res) => {
       }
     });
 
-    const host = req.protocol + '://' + req.get('host');
+    const host = getHostUrl(req);
     const playlistLines = response.data.split('\n');
     
     // Parse lines and rewrite segment URLs
