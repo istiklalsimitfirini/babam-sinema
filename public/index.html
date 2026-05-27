@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Babamın Sineması - Premium Film Portalı</title>
+  
+  <!-- Modern Typography from Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- HLS.js CDN for bulletproof streaming in browser -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-mode">
+  
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar glass">
+      <div class="logo">
+        <i class="fa-solid fa-clapperboard logo-icon animate-pulse"></i>
+        <span class="logo-text">SİNEMA</span>
+      </div>
+      
+      <nav class="nav-menu">
+        <button class="nav-item active" data-view="home">
+          <i class="fa-solid fa-house"></i>
+          <span>Ana Sayfa</span>
+        </button>
+        <button class="nav-item" data-view="search-view">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <span>Arama Yap</span>
+        </button>
+        <button class="nav-item" data-view="categories-view">
+          <i class="fa-solid fa-list"></i>
+          <span>Kategoriler</span>
+        </button>
+        <button class="nav-item" data-view="favorites-view">
+          <i class="fa-solid fa-heart"></i>
+          <span>Favorilerim</span>
+        </button>
+      </nav>
+      
+      <div class="sidebar-footer glass-sub">
+        <div class="m3u-status">
+          <i class="fa-solid fa-server status-dot active"></i>
+          <span class="status-text">Sunucu Aktif</span>
+        </div>
+        <button id="refresh-cache-btn" class="action-btn" title="Listeyi Yenile">
+          <i class="fa-solid fa-arrows-rotate"></i>
+          <span>Yenile</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Home View -->
+      <section id="home-view" class="view-section active">
+        <!-- Featured Movie Hero Banner -->
+        <div class="hero-banner" id="featured-hero">
+          <div class="hero-backdrop" id="hero-backdrop"></div>
+          <div class="hero-gradient"></div>
+          <div class="hero-details glass">
+            <span class="badge" id="hero-group">Günün Önerisi</span>
+            <h1 class="hero-title" id="hero-title">Film Yükleniyor...</h1>
+            
+            <div class="hero-meta">
+              <span class="meta-item rating">
+                <i class="fa-solid fa-star"></i>
+                <span id="hero-rating">8.5</span>
+              </span>
+              <span class="meta-item year" id="hero-year">2026</span>
+            </div>
+            
+            <p class="hero-desc" id="hero-desc">
+              Harika bir sinema deneyimi için arkanıza yaslanın. Bu portal, televizyonunuzda ve kumandanızda en rahat şekilde film izlemeniz için özel olarak tasarlanmıştır.
+            </p>
+            
+            <div class="hero-actions">
+              <button class="btn btn-primary" id="hero-play-btn">
+                <i class="fa-solid fa-play"></i> Oynat
+              </button>
+              <button class="btn btn-secondary" id="hero-fav-btn">
+                <i class="fa-solid fa-heart-circle-plus"></i> Favori
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Movie Lists (Dynamic Row Sliders) -->
+        <div class="rows-container" id="movie-rows">
+          <!-- Rows will be injected dynamically -->
+          <div class="row-loading">
+            <i class="fa-solid fa-spinner fa-spin-pulse"></i>
+            <p>Arşiv yükleniyor ve kategorilere ayrılıyor... Lütfen bekleyin.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Search View -->
+      <section id="search-view" class="view-section">
+        <div class="search-header">
+          <h2 class="section-title">Film Ara</h2>
+          <div class="search-box glass">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="search-input" placeholder="Film adı veya oyuncu yazın..." autofocus autocomplete="off">
+            <button id="search-clear-btn" class="clear-btn"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+        
+        <div class="search-results-grid" id="search-results">
+          <!-- Search results will be injected here -->
+          <div class="empty-state">
+            <i class="fa-solid fa-magnifying-glass animate-bounce"></i>
+            <p>Babanızın kolayca izlemesi için yukarıdan arama yapın.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Categories View -->
+      <section id="categories-view" class="view-section">
+        <h2 class="section-title">Tüm Kategoriler</h2>
+        <div class="categories-list-grid" id="categories-grid">
+          <!-- Categories list cards will be injected here -->
+        </div>
+      </section>
+
+      <!-- Favorites View -->
+      <section id="favorites-view" class="view-section">
+        <h2 class="section-title">Favori Filmlerim</h2>
+        <div class="search-results-grid" id="favorites-grid">
+          <!-- Favorites list will be injected here -->
+          <div class="empty-state">
+            <i class="fa-solid fa-heart-crack"></i>
+            <p>Henüz favori listenize film eklemediniz.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Custom Cinematic Video Player Modal -->
+  <div class="player-overlay" id="player-modal">
+    <div class="player-container">
+      <video id="video-player" playsinline controlslist="nodownload"></video>
+      
+      <!-- Custom OSD (On-Screen Controls) for Smart TV Remote -->
+      <div class="player-osd" id="player-controls">
+        <div class="osd-top">
+          <button class="player-btn" id="player-back-btn">
+            <i class="fa-solid fa-arrow-left"></i>
+            <span>Geri Dön</span>
+          </button>
+          <div class="player-movie-info">
+            <h3 id="player-title">Film Başlığı</h3>
+            <span id="player-subtitle">Kategori</span>
+          </div>
+        </div>
+        
+        <div class="osd-bottom">
+          <!-- Progress bar -->
+          <div class="progress-bar-container" id="progress-container">
+            <div class="progress-filled" id="progress-bar"></div>
+            <div class="progress-handle"></div>
+          </div>
+          
+          <div class="osd-controls-row">
+            <div class="controls-left">
+              <button class="player-btn" id="btn-rewind" title="10 Saniye Geri">
+                <i class="fa-solid fa-backward"></i>
+              </button>
+              <button class="player-btn btn-play-pause" id="btn-play-pause">
+                <i class="fa-solid fa-play"></i>
+              </button>
+              <button class="player-btn" id="btn-forward" title="10 Saniye İleri">
+                <i class="fa-solid fa-forward"></i>
+              </button>
+              <div class="player-time">
+                <span id="time-current">00:00</span> / <span id="time-total">00:00</span>
+              </div>
+            </div>
+            
+            <div class="controls-right">
+              <button class="player-btn" id="btn-fullscreen" title="Tam Ekran">
+                <i class="fa-solid fa-expand"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Script -->
+  <script src="app.js"></script>
+</body>
+</html>
