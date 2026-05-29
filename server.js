@@ -117,7 +117,7 @@ app.get('/vs/:id.m3u8', async (req, res) => {
 });
 
 /**
- * Endpoint 3: Proxy the HLS Media Playlist using the zero-bandwidth fragment trick
+ * Endpoint 3: Proxy the HLS Media Playlist rewriting segments to go through our proxy
  */
 app.get('/mm/*', async (req, res) => {
   const wildcardPath = req.params[0];
@@ -133,17 +133,15 @@ app.get('/mm/*', async (req, res) => {
       }
     });
 
+    const host = getHostUrl(req);
     const playlistLines = response.data.split('\n');
     
-    // Parse lines and rewrite segment URLs using the zero-bandwidth fragment trick
+    // Parse lines and rewrite segment URLs
     const rewrittenLines = playlistLines.map(line => {
       const trimmed = line.trim();
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        // Direct streaming: Rewrite segment URL by appending #.ts fragment
-        if (trimmed.endsWith('.jpg') || trimmed.endsWith('.gif') || trimmed.endsWith('.png') || trimmed.endsWith('.jpeg')) {
-          return `${trimmed}#.ts`;
-        }
-        return trimmed;
+        const ext = trimmed.endsWith('.vtt') ? 'vtt' : 'ts';
+        return `${host}/seg.${ext}?url=${encodeURIComponent(trimmed)}`;
       }
       return line;
     });
@@ -153,6 +151,45 @@ app.get('/mm/*', async (req, res) => {
   } catch (error) {
     console.error(`Error loading media playlist for ${wildcardPath}:`, error.message);
     res.status(502).send('Error loading video tracks.');
+  }
+});
+
+/**
+ * Endpoint 4: Proxy Stream Segments (Resolving CORB and TV player mime-type blocks)
+ */
+app.get('/seg.:ext', async (req, res) => {
+  const { ext } = req.params;
+  const targetUrl = req.query.url;
+
+  if (!targetUrl) {
+    return res.status(400).send('Missing target URL');
+  }
+
+  try {
+    if (ext === 'vtt') {
+      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    } else {
+      res.setHeader('Content-Type', 'video/mp2t');
+    }
+    
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    // Fetch original segment stream
+    const response = await axios({
+      method: 'get',
+      url: targetUrl,
+      responseType: 'stream',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://vidmody.com/'
+      }
+    });
+
+    // Pipe directly to client response
+    response.data.pipe(res);
+  } catch (error) {
+    console.error(`Error proxying segment ${targetUrl}:`, error.message);
+    res.status(502).send('Error retrieving stream segment.');
   }
 });
 
