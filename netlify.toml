@@ -1,0 +1,14 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+  command = "npm run build"
+
+[[redirects]]
+  from = "/vs/*"
+  to = "/.netlify/functions/server/vs/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/mm/*"
+  to = "/.netlify/functions/server/mm/:splat"
+  status = 200

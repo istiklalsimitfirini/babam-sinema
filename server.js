@@ -7,19 +7,13 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS for all routes
+// Enable CORS
 app.use(cors());
 
-// Helper to get correct protocol (handling HTTPS proxy termination in cloud environments like Render/Koyeb)
-function getHostUrl(req) {
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-  return `${protocol}://${req.get('host')}`;
-}
-
-// Serve static portal files
+// Serve static portal files (including playlist.m3u after local build)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// M3U Playlist Cache
+// M3U Playlist Cache (for dynamic local runs)
 let playlistCache = {
   data: null,
   lastFetched: null
@@ -27,6 +21,14 @@ let playlistCache = {
 
 const CDN_M3U_URL = 'https://cdn.jsdelivr.net/gh/Playtvapp/Playtvlist@main/FİLMLERFANTİKAPPP.m3u';
 const LOCAL_M3U_PATH = path.join(__dirname, 'FİLMLERFANTİKAPPP.m3u');
+
+/**
+ * Helper to get correct protocol and host (handling proxy headers)
+ */
+function getHostUrl(req) {
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  return `${protocol}://${req.get('host')}`;
+}
 
 /**
  * Helper to fetch and cache the M3U file
@@ -40,12 +42,10 @@ async function getM3UData(forceRefresh = false) {
   console.log('Fetching and parsing M3U playlist...');
   let rawData = '';
 
-  // 1. Try to load local file if exists
   if (fs.existsSync(LOCAL_M3U_PATH)) {
     console.log('Loading playlist from local file...');
     rawData = fs.readFileSync(LOCAL_M3U_PATH, 'utf8');
   } else {
-    // 2. Fallback to CDN URL
     console.log('Local file not found, fetching from CDN...');
     const response = await axios.get(CDN_M3U_URL, { responseType: 'text' });
     rawData = response.data;
@@ -58,7 +58,7 @@ async function getM3UData(forceRefresh = false) {
 }
 
 /**
- * Endpoint 1: Rewrite and serve the M3U Playlist
+ * Endpoint 1: Rewrite and serve the M3U Playlist dynamically (for local testing)
  */
 app.get('/playlist.m3u', async (req, res) => {
   try {
@@ -68,9 +68,6 @@ app.get('/playlist.m3u', async (req, res) => {
     const host = getHostUrl(req);
     console.log(`Rewriting playlist links to use host: ${host}`);
 
-    // Regex explanation:
-    // Matches: https://vidmody.com/vs/tt123456
-    // Rewrites to: http://<host>/vs/tt123456.m3u8
     const rewrittenData = rawData.replace(/https:\/\/vidmody\.com\/vs\/([a-zA-Z0-9_-]+)/g, (match, id) => {
       return `${host}/vs/${id}.m3u8`;
     });
@@ -103,9 +100,7 @@ app.get('/vs/:id.m3u8', async (req, res) => {
     const host = getHostUrl(req);
     let playlistText = response.data;
 
-    // Rewrite internal master playlist links:
-    // Replace: https://vidmody.com/mm/tt123456/.../index.gif
-    // With: http://<host>/mm/tt123456/.../index.m3u8
+    // Rewrite internal master playlist links
     const rewrittenPlaylist = playlistText.replace(
       /https:\/\/vidmody\.com\/mm\/([^\s"]+?)\.gif/g,
       (match, wildcardPath) => {
@@ -122,14 +117,10 @@ app.get('/vs/:id.m3u8', async (req, res) => {
 });
 
 /**
- * Endpoint 3: Proxy the HLS Media Playlist
+ * Endpoint 3: Proxy the HLS Media Playlist using the zero-bandwidth fragment trick
  */
 app.get('/mm/*', async (req, res) => {
-  // wildcardPath will be something like: tt20859028/main_1080p/index-v1-a1.m3u8
   const wildcardPath = req.params[0];
-  
-  // Reconstruct the original .gif playlist URL:
-  // tt20859028/main_1080p/index-v1-a1.gif
   const originalPlaylistPath = wildcardPath.replace(/\.m3u8$/, '.gif');
   const targetUrl = `https://vidmody.com/mm/${originalPlaylistPath}`;
 
@@ -142,16 +133,17 @@ app.get('/mm/*', async (req, res) => {
       }
     });
 
-    const host = getHostUrl(req);
     const playlistLines = response.data.split('\n');
     
-    // Parse lines and rewrite segment URLs
+    // Parse lines and rewrite segment URLs using the zero-bandwidth fragment trick
     const rewrittenLines = playlistLines.map(line => {
       const trimmed = line.trim();
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        // Rewrite disguised segments to go through our proxy
-        const ext = trimmed.endsWith('.vtt') ? 'vtt' : 'ts';
-        return `${host}/seg.${ext}?url=${encodeURIComponent(trimmed)}`;
+        // Direct streaming: Rewrite segment URL by appending #.ts fragment
+        if (trimmed.endsWith('.jpg') || trimmed.endsWith('.gif') || trimmed.endsWith('.png') || trimmed.endsWith('.jpeg')) {
+          return `${trimmed}#.ts`;
+        }
+        return trimmed;
       }
       return line;
     });
@@ -161,46 +153,6 @@ app.get('/mm/*', async (req, res) => {
   } catch (error) {
     console.error(`Error loading media playlist for ${wildcardPath}:`, error.message);
     res.status(502).send('Error loading video tracks.');
-  }
-});
-
-/**
- * Endpoint 4: Proxy Stream Segments (TS Video/Audio chunks and VTT Subtitles)
- */
-app.get('/seg.:ext', async (req, res) => {
-  const { ext } = req.params;
-  const targetUrl = req.query.url;
-
-  if (!targetUrl) {
-    return res.status(400).send('Missing target URL');
-  }
-
-  try {
-    // Determine content type based on extension
-    if (ext === 'vtt') {
-      res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    } else {
-      res.setHeader('Content-Type', 'video/mp2t');
-    }
-    
-    res.setHeader('Access-Control-Allow-Origin', '*');
-
-    // Fetch original segment stream
-    const response = await axios({
-      method: 'get',
-      url: targetUrl,
-      responseType: 'stream',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://vidmody.com/'
-      }
-    });
-
-    // Pipe directly to client response
-    response.data.pipe(res);
-  } catch (error) {
-    console.error(`Error proxying segment ${targetUrl}:`, error.message);
-    res.status(502).send('Error retrieving stream segment.');
   }
 });
 
