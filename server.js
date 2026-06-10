@@ -56,19 +56,56 @@ async function getM3UData(forceRefresh = false) {
 }
 
 /**
- * Endpoint 1: Rewrite and serve the M3U Playlist dynamically (for local testing and HF Space proxying)
+ * Endpoint 1: Rewrite and serve the M3U Playlist dynamically with truncation to prevent Smart TV crashes
  */
 app.get('/playlist.m3u', async (req, res) => {
   try {
     const forceRefresh = req.query.refresh === 'true';
+    const limit = parseInt(req.query.limit) || 2000; // Default limit is 2000 to prevent TV app crashes
     const rawData = await getM3UData(forceRefresh);
 
-    const host = getHostUrl(req);
-    console.log(`Rewriting playlist links to use host: ${host}`);
+    console.log(`Processing playlist with limit: ${limit}`);
+    const lines = rawData.split('\n');
+    const rewrittenLines = [];
+    
+    if (lines.length > 0 && lines[0].startsWith('#EXTM3U')) {
+      rewrittenLines.push(lines[0]);
+    } else {
+      rewrittenLines.push('#EXTM3U');
+    }
 
-    const rewrittenData = rawData.replace(/https:\/\/vidmody\.com\/vs\/([a-zA-Z0-9_-]+)/g, (match, id) => {
-      return `${host}/vs/${id}.m3u8`;
-    });
+    const host = getHostUrl(req);
+    let count = 0;
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('#EXTINF')) {
+        if (count >= limit) break;
+        
+        // Push the EXTINF line
+        rewrittenLines.push(line);
+        
+        // Look for the next line which should be the URL
+        let nextIndex = i + 1;
+        while (nextIndex < lines.length && lines[nextIndex].trim() === '') {
+          nextIndex++;
+        }
+        
+        if (nextIndex < lines.length && !lines[nextIndex].startsWith('#')) {
+          const urlLine = lines[nextIndex].trim();
+          // Rewrite the URL
+          const rewrittenUrl = urlLine.replace(/https:\/\/vidmody\.com\/vs\/([a-zA-Z0-9_-]+)/g, (match, id) => {
+            return `${host}/vs/${id}.m3u8`;
+          });
+          rewrittenLines.push(rewrittenUrl);
+          i = nextIndex; // Move index forward
+        }
+        count++;
+      }
+    }
+
+    const rewrittenData = rewrittenLines.join('\n');
+    console.log(`Serving dynamic playlist with ${count} items (Size: ${(rewrittenData.length / 1024).toFixed(2)} KB)`);
 
     res.setHeader('Content-Type', 'application/x-mpegURL; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="playlist.m3u"');
