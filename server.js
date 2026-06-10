@@ -3,6 +3,7 @@ const cors = require('cors');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -62,9 +63,10 @@ app.get('/playlist.m3u', async (req, res) => {
   try {
     const forceRefresh = req.query.refresh === 'true';
     const limit = parseInt(req.query.limit) || 2000; // Default limit is 2000 to prevent TV app crashes
+    const isDirect = req.query.direct === 'true';
     const rawData = await getM3UData(forceRefresh);
 
-    console.log(`Processing playlist with limit: ${limit}`);
+    console.log(`Processing playlist with limit: ${limit} (Direct: ${isDirect})`);
     const lines = rawData.split('\n');
     const rewrittenLines = [];
     
@@ -95,7 +97,8 @@ app.get('/playlist.m3u', async (req, res) => {
           const urlLine = lines[nextIndex].trim();
           // Rewrite the URL
           const rewrittenUrl = urlLine.replace(/https:\/\/vidmody\.com\/vs\/([a-zA-Z0-9_-]+)/g, (match, id) => {
-            return `${host}/vs/${id}.m3u8`;
+            const queryParams = isDirect ? '?direct=true' : '';
+            return `${host}/vs/${id}.m3u8${queryParams}`;
           });
           rewrittenLines.push(rewrittenUrl);
           i = nextIndex; // Move index forward
@@ -125,9 +128,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/vs/:id.m3u8', async (req, res) => {
   const { id } = req.params;
   const targetUrl = `https://vidmody.com/vs/${id}`;
+  const isDirect = req.query.direct === 'true';
 
   try {
-    console.log(`Proxying Master Playlist: ${targetUrl}`);
+    console.log(`Proxying Master Playlist: ${targetUrl} (Direct: ${isDirect})`);
     const response = await axios.get(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -139,10 +143,11 @@ app.get('/vs/:id.m3u8', async (req, res) => {
     let playlistText = response.data;
 
     // Rewrite internal master playlist links
+    const queryParams = isDirect ? '?direct=true' : '';
     const rewrittenPlaylist = playlistText.replace(
       /https:\/\/vidmody\.com\/mm\/([^\s"]+?)\.gif/g,
       (match, wildcardPath) => {
-        return `${host}/mm/${wildcardPath}.m3u8`;
+        return `${host}/mm/${wildcardPath}.m3u8${queryParams}`;
       }
     );
 
@@ -155,15 +160,16 @@ app.get('/vs/:id.m3u8', async (req, res) => {
 });
 
 /**
- * Endpoint 3: Proxy the HLS Media Playlist rewriting segments to go through our proxy
+ * Endpoint 3: Proxy the HLS Media Playlist rewriting segments to go through our proxy or direct link
  */
 app.get('/mm/*', async (req, res) => {
   const wildcardPath = req.params[0];
   const originalPlaylistPath = wildcardPath.replace(/\.m3u8$/, '.gif');
   const targetUrl = `https://vidmody.com/mm/${originalPlaylistPath}`;
+  const isDirect = req.query.direct === 'true';
 
   try {
-    console.log(`Proxying Media Playlist: ${targetUrl}`);
+    console.log(`Proxying Media Playlist: ${targetUrl} (Direct: ${isDirect})`);
     const response = await axios.get(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -178,8 +184,17 @@ app.get('/mm/*', async (req, res) => {
     const rewrittenLines = playlistLines.map(line => {
       const trimmed = line.trim();
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        const ext = trimmed.endsWith('.vtt') ? 'vtt' : 'ts';
-        return `${host}/seg.${ext}?url=${encodeURIComponent(trimmed)}`;
+        if (isDirect) {
+          // Zero-bandwidth direct link trick: append #.ts to make the TV play it directly from CDN
+          if (trimmed.endsWith('.jpg') || trimmed.endsWith('.gif') || trimmed.endsWith('.png') || trimmed.endsWith('.jpeg')) {
+            return `${trimmed}#.ts`;
+          }
+          return trimmed;
+        } else {
+          // Proxy stream segments through our server
+          const ext = trimmed.endsWith('.vtt') ? 'vtt' : 'ts';
+          return `${host}/seg.${ext}?url=${encodeURIComponent(trimmed)}`;
+        }
       }
       return line;
     });
@@ -193,7 +208,7 @@ app.get('/mm/*', async (req, res) => {
 });
 
 /**
- * Endpoint 4: Proxy Stream Segments (Resolving CORB and TV player mime-type blocks)
+ * Endpoint 4: Proxy Stream Segments (Resolving CORB and TV player mime-type blocks) using high-performance native https module
  */
 app.get('/seg.:ext', async (req, res) => {
   const { ext } = req.params;
@@ -204,6 +219,11 @@ app.get('/seg.:ext', async (req, res) => {
   }
 
   try {
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Referer': 'https://vidmody.com/'
+    };
+
     if (ext === 'vtt') {
       res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
     } else {
@@ -212,22 +232,25 @@ app.get('/seg.:ext', async (req, res) => {
     
     res.setHeader('Access-Control-Allow-Origin', '*');
 
-    // Fetch original segment stream
-    const response = await axios({
-      method: 'get',
-      url: targetUrl,
-      responseType: 'stream',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://vidmody.com/'
+    // Proxy stream segments using native Node.js https.get for high performance and low latency
+    https.get(targetUrl, { headers }, (proxyRes) => {
+      if (proxyRes.statusCode >= 400) {
+        console.error(`Proxy request failed with status: ${proxyRes.statusCode} for URL: ${targetUrl}`);
+        res.status(proxyRes.statusCode).end();
+        return;
+      }
+      proxyRes.pipe(res);
+    }).on('error', (err) => {
+      console.error(`Error proxying segment ${targetUrl}:`, err.message);
+      if (!res.headersSent) {
+        res.status(502).send('Error retrieving stream segment.');
       }
     });
-
-    // Pipe directly to client response
-    response.data.pipe(res);
   } catch (error) {
-    console.error(`Error proxying segment ${targetUrl}:`, error.message);
-    res.status(502).send('Error retrieving stream segment.');
+    console.error(`Error initializing segment proxy:`, error.message);
+    if (!res.headersSent) {
+      res.status(500).send('Proxy internal error.');
+    }
   }
 });
 
