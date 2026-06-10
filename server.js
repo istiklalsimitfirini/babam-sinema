@@ -10,9 +10,6 @@ const PORT = process.env.PORT || 3000;
 // Enable CORS
 app.use(cors());
 
-// Serve static portal files (including playlist.m3u after local build)
-app.use(express.static(path.join(__dirname, 'public')));
-
 // M3U Playlist Cache (for dynamic local runs)
 let playlistCache = {
   data: null,
@@ -27,7 +24,8 @@ const LOCAL_M3U_PATH = path.join(__dirname, 'FİLMLERFANTİKAPPP.m3u');
  */
 function getHostUrl(req) {
   const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-  return `${protocol}://${req.get('host')}`;
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  return `${protocol}://${host}`;
 }
 
 /**
@@ -58,7 +56,7 @@ async function getM3UData(forceRefresh = false) {
 }
 
 /**
- * Endpoint 1: Rewrite and serve the M3U Playlist dynamically (for local testing)
+ * Endpoint 1: Rewrite and serve the M3U Playlist dynamically (for local testing and HF Space proxying)
  */
 app.get('/playlist.m3u', async (req, res) => {
   try {
@@ -80,6 +78,9 @@ app.get('/playlist.m3u', async (req, res) => {
     res.status(500).send('Error loading M3U playlist: ' + error.message);
   }
 });
+
+// Serve static portal files (like index.html, styles.css, app.js) AFTER the dynamic playlist route
+app.use(express.static(path.join(__dirname, 'public')));
 
 /**
  * Endpoint 2: Proxy the HLS Master Playlist

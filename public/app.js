@@ -417,7 +417,16 @@ function switchView(viewName) {
 
 // Premium Cinematic Player Control Logic
 function playMovie(movie) {
-  console.log(`Starting playback for: ${movie.title} via url: ${movie.url}`);
+  // Self-heal: Ensure movie URL uses the current active website's domain
+  let movieUrl = movie.url;
+  if (movieUrl.includes('/vs/')) {
+    const idMatch = movieUrl.match(/\/vs\/([a-zA-Z0-9_-]+)/);
+    if (idMatch) {
+      movieUrl = `${window.location.origin}/vs/${idMatch[1]}.m3u8`;
+    }
+  }
+
+  console.log(`Starting playback for: ${movie.title} via url: ${movieUrl}`);
   playerModal.classList.add('active');
   navGroup = 'player';
   
@@ -434,7 +443,7 @@ function playMovie(movie) {
         xhr.withCredentials = false; // Disable credentials for cross-origin segments
       }
     });
-    hlsInstance.loadSource(movie.url);
+    hlsInstance.loadSource(movieUrl);
     hlsInstance.attachMedia(videoPlayer);
     hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
       videoPlayer.play();
